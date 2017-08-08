@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:context="http://www.springframework.org/schema/context" xmlns:cluster="http://www.mulesoft.org/schema/mule/ee/cluster" xmlns:email="http://www.mulesoft.org/schema/mule/email" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd
+http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-current.xsd">
+    <http:listener-config name="HTTP_Listener_Configuration" host="localhost" port="${http.port}" doc:name="HTTP Listener Configuration"/>
+    <db:generic-config name="Generic_Database_Configuration" url="jdbc:postgresql://localhost:5432/Ticketing?password=samar&amp;user=postgres" driverClassName="org.postgresql.Driver" doc:name="Generic Database Configuration"/>
+    <context:property-placeholder location="project-${env}.properties"/>
+    <flow name="GETMessage">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/project/{ticketID}/message/{messageID}" allowedMethods="GET" doc:name="HTTP"/>
+        <set-variable variableName="ticketID" value="#[message.inboundProperties.'http.uri.params'.get(&quot;ticketID&quot;)]" doc:name="Variable"/>
+        <set-variable variableName="messageID" value="#[message.inboundProperties.'http.uri.params'.get(&quot;messageID&quot;)]" doc:name="Variable"/>
+        <db:select config-ref="Generic_Database_Configuration" doc:name="messageDB">
+            <db:parameterized-query><![CDATA[select * from Message
+where FK_message_ID = #[flowVars.messageID] and ID = #[flowVars.ticketID]]]></db:parameterized-query>
+        </db:select>
+        <custom-processor name="Custom_Processor2" class="project.messageProcessorJava" doc:name="Custom_Processor2"/>
+        <choice doc:name="Choice">
+            <when expression="#[message.payload.ID == 0]">
+                <custom-processor name="Custom_Processor1" class="project.DBException" doc:name="Custom_Processor1"/>
+                <json:object-to-json-transformer doc:name="Object to JSON"/>
+            </when>
+            <otherwise>
+                <json:object-to-json-transformer doc:name="Object to JSON"/>
+                <logger level="INFO" doc:name="Logger"/>
+            </otherwise>
+        </choice>
+  
+    </flow>
+    <flow name="GETTicketAll">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/project" doc:name="HTTP" allowedMethods="GET"/>
+        <flow-ref name="buildQueryFlow" doc:name="buildQueryFlow"/>
+        <db:select config-ref="Generic_Database_Configuration" doc:name="Database">
+            <db:dynamic-query><![CDATA[select #[flowVars.fields] from Ticket
+where Ticket.state in (#[flowVars.state])
+order by #[flowVars.orderby]]]></db:dynamic-query>
+        </db:select>
+        <flow-ref name="JsonConvertFlow" doc:name="JsonConvertFlow"/>
+    </flow>
+    <flow name="GETTicketTicketID">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/project/{ticketID}" allowedMethods="GET" doc:name="HTTP"/>
+        <flow-ref name="buildQueryFlow" doc:name="buildQueryFlow"/>
+        <db:select config-ref="Generic_Database_Configuration" doc:name="ticketDB">
+            <db:dynamic-query><![CDATA[select #[flowVars.fields] from Ticket
+where id = #[message.inboundProperties.'http.uri.params'.get("ticketID")] and Ticket.state in (#[flowVars.state])
+order by #[flowVars.orderby]]]></db:dynamic-query>
+        </db:select>
+        <flow-ref name="JsonConvertFlow" doc:name="JsonConvertFlow"/>
+    </flow>
+    <sub-flow name="JsonConvertFlow">
+        <custom-processor name="JSONConverter" class="project.stringtoJsonJava" doc:name="JSONConverter"/>
+        <json:object-to-json-transformer doc:name="Object to JSON"/>
+        <custom-processor class="project.selectJSON" doc:name="JSONSelector" name="JSONSelector"/>
+        <logger level="INFO" doc:name="Logger"/>
+    </sub-flow>
+    <sub-flow name="buildQueryFlow">
+        <logger level="INFO" doc:name="Logger"/>
+        <custom-processor name="queryStringProcessor" class="project.buildQueryString" doc:name="queryStringProcessor"/>
+    </sub-flow>
+</mule>

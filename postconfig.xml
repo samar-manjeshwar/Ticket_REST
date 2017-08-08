@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:cluster="http://www.mulesoft.org/schema/mule/ee/cluster" xmlns:mulexml="http://www.mulesoft.org/schema/mule/xml"
+	xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:json="http://www.mulesoft.org/schema/mule/json"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/xml http://www.mulesoft.org/schema/mule/xml/current/mule-xml.xsd">
+	<mulexml:namespace-manager
+		includeConfigNamespaces="true">
+		<mulexml:namespace prefix="tns"
+			uri="http://www.example.org/ticketSchema" />
+	</mulexml:namespace-manager>
+    <configuration defaultExceptionStrategy-ref="GlobalException" doc:name="Configuration">
+        <http:config useTransportForUris="false"/>
+    </configuration>
+
+
+	<flow name="postconfigFlow">
+		<http:listener config-ref="HTTP_Listener_Configuration"
+			path="/project" allowedMethods="POST" doc:name="HTTP" />
+		<json:json-to-object-transformer
+			doc:name="JSON to Object" />
+		<logger level="INFO" doc:name="Logger" />
+        <component class="project.convertToTicket" doc:name="Java"/>
+        <db:insert config-ref="Generic_Database_Configuration" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into Ticket(
+customer_ID ,
+user_ID ,
+group_ID ,
+label_ID ,
+state ,
+subject ,
+reply_to ,
+reply_cc ,
+spam ,
+trash ,
+updated_at ,
+created_at 
+) 
+values(
+#[message.payload.customer_ID],
+#[message.payload.user_ID],
+#[message.payload.group_ID],
+#[message.payload.label_ID],
+#[message.payload.state],
+#[message.payload.subject],
+#[message.payload.reply_to],
+#[message.payload.reply_cc],
+#[message.payload.spam],
+#[message.payload.trash],
+#[message.payload.updated_at],
+#[message.payload.created_at]
+)]]></db:parameterized-query>
+        </db:insert>
+        <set-payload value="#[message.outboundAttachments.put(&quot;status code&quot;,200)]
+{
+	&quot;status code&quot;:200
+}" doc:name="Set Payload"/>
+        <logger level="INFO" doc:name="Logger"/>
+	</flow>
+    <choice-exception-strategy name="GlobalException">
+        <catch-exception-strategy when="#[exception.causedBy(project.validationException)]" doc:name="validationException">
+            <set-payload value="#[exception.getCause().toString()]" doc:name="Set Payload"/>
+            <set-property propertyName="status code" value="400" doc:name="Property"/>
+            <custom-processor name="buildExceptionJson" class="project.buildExceptionJson" doc:name="validationExceptionConvertion"/>
+            <json:object-to-json-transformer doc:name="Object to JSON"/>
+        </catch-exception-strategy>
+        <catch-exception-strategy when="#[exception.causedBy(project.badConnectionException)]" doc:name="badConnectionException">
+            <set-payload value="#[exception.getCause().toString()]" doc:name="Set Payload"/>
+            <custom-processor class="project.buildExceptionJson" doc:name="badConnectionExceptionConvertion" name="badConnectionExceptionConvertion"/>
+            <json:object-to-json-transformer doc:name="Object to JSON"/>
+        </catch-exception-strategy>
+        <catch-exception-strategy doc:name="badRequestException" when="#[exception.causedBy(project.badRequestException)]">
+            <set-payload value="#[exception.getCause().toString()]" doc:name="Set Payload"/>
+            <custom-processor class="project.buildExceptionJson" doc:name="badRequestExceptionConvertion" name="badRequestExceptionConvertion"/>
+            <json:object-to-json-transformer doc:name="Object to JSON"/>
+        </catch-exception-strategy>
+        <catch-exception-strategy doc:name="defaultException">
+            <set-payload value="#[exception.getCause().toString()]" doc:name="Set Payload"/>
+            <custom-processor class="project.buildExceptionJson" doc:name="defaultExceptionConvertion" name="defaultExceptionConvertion"/>
+            <json:object-to-json-transformer doc:name="Object to JSON"/>
+        </catch-exception-strategy>
+    </choice-exception-strategy>
+	<flow name="postconfigFlow1">
+		<http:listener config-ref="HTTP_Listener_Configuration"
+			path="/soap" doc:name="HTTP" />
+		<logger level="INFO" doc:name="Logger"
+			message="#[xpath3('/tns:getAllTicketResponse/tns:customer_id')]" />
+
+		<db:insert config-ref="Generic_Database_Configuration" doc:name="Database">
+            <db:parameterized-query><![CDATA[insert into Ticket(customer_id,user_id,group_id,label_id,state,subject,reply_to,reply_cc,spam,trash,updated_at,created_at) 
+			values( #[xpath3('/tns:getAllTicketResponse/tns:customer_id')], 					#[xpath3('/tns:getAllTicketResponse/tns:user_id')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:group_id')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:label_id')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:state')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:subject')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:reply_to')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:reply_cc')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:spam')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:trash')], 
+					#[xpath3('/tns:getAllTicketResponse/tns:updated_at')],
+					#[xpath3('/tns:getAllTicketResponse/tns:created_at')] )]]></db:parameterized-query>
+ 
+			</db:insert>
+        
+		<logger level="INFO" doc:name="Logger" message="Inserted into DB"/>
+	</flow>
+</mule>
